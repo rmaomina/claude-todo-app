@@ -74,7 +74,7 @@ class JiraService {
     epicKey?: string; 
   }) {
     try {
-      const fields: any = {
+      const fields: Record<string, unknown> = {
         project: { key: story.projectKey },
         summary: story.title,
         description: story.description ? {
@@ -116,7 +116,7 @@ class JiraService {
     storyKey?: string; 
   }) {
     try {
-      const fields: any = {
+      const fields: Record<string, unknown> = {
         project: { key: task.projectKey },
         summary: task.title,
         description: task.description ? {
@@ -162,7 +162,7 @@ class JiraService {
       }
 
       const transitions = await transitionsResponse.json();
-      const transition = transitions.transitions.find((t: any) => 
+      const transition = transitions.transitions.find((t: { to: { name: string } }) => 
         t.to.name.toLowerCase() === statusName.toLowerCase()
       );
 
