@@ -3,7 +3,7 @@ import GitHubProvider from 'next-auth/providers/github';
 import { PrismaAdapter } from '@next-auth/prisma-adapter';
 import { prisma } from '@/lib/prisma';
 
-const handler = NextAuth({
+const authOptions = {
   adapter: PrismaAdapter(prisma),
   providers: [
     GitHubProvider({
@@ -12,13 +12,13 @@ const handler = NextAuth({
     }),
   ],
   callbacks: {
-    session: async ({ session, token }) => {
+    session: async ({ session, token }: { session: { user?: { id?: string } }; token: { sub?: string } }) => {
       if (session?.user && token?.sub) {
         session.user.id = token.sub;
       }
       return session;
     },
-    jwt: async ({ user, token }) => {
+    jwt: async ({ user, token }: { user?: { id?: string }; token: { uid?: string } }) => {
       if (user) {
         token.uid = user.id;
       }
@@ -26,11 +26,20 @@ const handler = NextAuth({
     },
   },
   session: {
-    strategy: 'jwt',
+    strategy: 'jwt' as const,
   },
   pages: {
     signIn: '/auth/signin',
   },
-});
+} as const;
 
-export { handler as GET, handler as POST };
+// Next.js 15 App Router에서는 이렇게 export
+export async function GET(request: Request) {
+  // @ts-expect-error - NextAuth v4와 Next.js 15 호환성 이슈
+  return NextAuth(request, authOptions);
+}
+
+export async function POST(request: Request) {
+  // @ts-expect-error - NextAuth v4와 Next.js 15 호환성 이슈
+  return NextAuth(request, authOptions);
+}
