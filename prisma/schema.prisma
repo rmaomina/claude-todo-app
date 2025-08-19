@@ -6,7 +6,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -38,18 +38,28 @@ model Session {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  name          String?
-  email         String?   @unique
-  emailVerified DateTime?
-  image         String?
-  accounts      Account[]
-  sessions      Session[]
-  tasks         Task[]
-  stories       Story[]
-  epics         Epic[]
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id               String    @id @default(cuid())
+  name             String?
+  email            String?   @unique
+  emailVerified    DateTime?
+  image            String?
+  timezone         String    @default("UTC")
+  locale           String    @default("en")
+  theme            String    @default("light") // light, dark, system
+  notificationsEnabled Boolean @default(true)
+  lastActiveAt     DateTime  @default(now())
+  accounts         Account[]
+  sessions         Session[]
+  tasks            Task[]
+  stories          Story[]
+  epics            Epic[]
+  workspaces       WorkspaceMember[]
+  ownedWorkspaces  Workspace[] @relation("WorkspaceOwner")
+  sharedTasks      TaskShare[]
+  comments         Comment[]
+  attachments      Attachment[]
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 }
 
 model VerificationToken {
@@ -60,45 +70,286 @@ model VerificationToken {
   @@unique([identifier, token])
 }
 
-model Epic {
+// 워크스페이스 (팀/프로젝트 단위)
+model Workspace {
   id          String   @id @default(cuid())
-  title       String
+  name        String
   description String?
-  status      String   @default("TODO")
-  priority    String   @default("MEDIUM")
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  slug        String   @unique
+  isPublic    Boolean  @default(false)
+  ownerId     String
+  owner       User     @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members     WorkspaceMember[]
+  epics       Epic[]
   stories     Story[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-}
-
-model Story {
-  id          String   @id @default(cuid())
-  title       String
-  description String?
-  status      String   @default("TODO")
-  priority    String   @default("MEDIUM")
-  epicId      String?
-  epic        Epic?    @relation(fields: [epicId], references: [id], onDelete: Cascade)
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   tasks       Task[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  @@index([slug])
+  @@index([ownerId])
+}
+
+model WorkspaceMember {
+  id          String    @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        String    @default("MEMBER") // OWNER, ADMIN, MEMBER, VIEWER
+  joinedAt    DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+}
+
+model Epic {
+  id          String     @id @default(cuid())
+  title       String
+  description String?
+  status      EpicStatus @default(TODO)
+  priority    Priority   @default(MEDIUM)
+  startDate   DateTime?
+  endDate     DateTime?
+  progress    Int        @default(0) // 0-100
+  color       String?    // hex color for visualization
+  workspaceId String?
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stories     Story[]
+  tags        TagOnEpic[]
+  comments    Comment[]
+  attachments Attachment[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([userId])
+  @@index([workspaceId])
+  @@index([status])
+}
+
+model Story {
+  id          String      @id @default(cuid())
+  title       String
+  description String?
+  status      StoryStatus @default(TODO)
+  priority    Priority    @default(MEDIUM)
+  storyPoints Int?        // agile story points
+  startDate   DateTime?
+  endDate     DateTime?
+  epicId      String?
+  epic        Epic?       @relation(fields: [epicId], references: [id], onDelete: Cascade)
+  workspaceId String?
+  workspace   Workspace?  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tasks       Task[]
+  tags        TagOnStory[]
+  comments    Comment[]
+  attachments Attachment[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([userId])
+  @@index([epicId])
+  @@index([workspaceId])
+  @@index([status])
 }
 
 model Task {
-  id          String   @id @default(cuid())
+  id          String     @id @default(cuid())
   title       String
   description String?
-  completed   Boolean  @default(false)
-  status      String   @default("TODO")
-  priority    String   @default("MEDIUM")
+  completed   Boolean    @default(false)
+  status      TaskStatus @default(TODO)
+  priority    Priority   @default(MEDIUM)
+  dueDate     DateTime?
+  completedAt DateTime?
+  estimatedMinutes Int?   // 예상 소요 시간 (분)
+  actualMinutes    Int?   // 실제 소요 시간 (분)
   storyId     String?
-  story       Story?   @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  story       Story?     @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  workspaceId String?
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parentTaskId String?   // 서브태스크 지원
+  parentTask  Task?      @relation("TaskSubtasks", fields: [parentTaskId], references: [id], onDelete: Cascade)
+  subtasks    Task[]     @relation("TaskSubtasks")
+  shares      TaskShare[]
+  tags        TagOnTask[]
+  comments    Comment[]
+  attachments Attachment[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([userId])
+  @@index([storyId])
+  @@index([workspaceId])
+  @@index([status])
+  @@index([dueDate])
+  @@index([completed])
+}
+
+// 태스크 공유 (개별 태스크 공유)
+model TaskShare {
+  id       String @id @default(cuid())
+  taskId   String
+  userId   String
+  role     String @default("VIEWER") // VIEWER, EDITOR
+  task     Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sharedAt DateTime @default(now())
+
+  @@unique([taskId, userId])
+}
+
+// 태그 시스템
+model Tag {
+  id          String @id @default(cuid())
+  name        String
+  color       String @default("#6366F1") // hex color
+  description String?
+  epics       TagOnEpic[]
+  stories     TagOnStory[]
+  tasks       TagOnTask[]
   createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+
+  @@unique([name])
+}
+
+model TagOnEpic {
+  epic   Epic   @relation(fields: [epicId], references: [id], onDelete: Cascade)
+  epicId String
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  tagId  String
+
+  @@id([epicId, tagId])
+}
+
+model TagOnStory {
+  story   Story  @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  storyId String
+  tag     Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  tagId   String
+
+  @@id([storyId, tagId])
+}
+
+model TagOnTask {
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  taskId String
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  tagId  String
+
+  @@id([taskId, tagId])
+}
+
+// 댓글 시스템
+model Comment {
+  id        String    @id @default(cuid())
+  content   String
+  epicId    String?
+  storyId   String?
+  taskId    String?
+  epic      Epic?     @relation(fields: [epicId], references: [id], onDelete: Cascade)
+  story     Story?    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  task      Task?     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parentId  String?   // 답글 기능
+  parent    Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   Comment[] @relation("CommentReplies")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([epicId])
+  @@index([storyId])
+  @@index([taskId])
+  @@index([userId])
+}
+
+// 첨부파일 시스템
+model Attachment {
+  id       String @id @default(cuid())
+  filename String
+  fileUrl  String
+  fileSize Int    // bytes
+  mimeType String
+  epicId   String?
+  storyId  String?
+  taskId   String?
+  epic     Epic?  @relation(fields: [epicId], references: [id], onDelete: Cascade)
+  story    Story? @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  task     Task?  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([epicId])
+  @@index([storyId])
+  @@index([taskId])
+  @@index([userId])
+}
+
+// 알림 시스템
+model Notification {
+  id        String   @id @default(cuid())
+  title     String
+  message   String
+  type      String   // TASK_ASSIGNED, TASK_COMPLETED, COMMENT_ADDED, etc.
+  userId    String
+  isRead    Boolean  @default(false)
+  entityId  String?  // 관련 엔티티 ID
+  entityType String? // epic, story, task
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+  @@index([createdAt])
+}
+
+// 활동 로그
+model ActivityLog {
+  id         String   @id @default(cuid())
+  action     String   // CREATED, UPDATED, DELETED, COMPLETED, etc.
+  entityType String   // epic, story, task
+  entityId   String
+  userId     String
+  metadata   Json?    // 추가 정보
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// 상태 열거형
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  IN_REVIEW
+  DONE
+  CANCELLED
+}
+
+enum StoryStatus {
+  TODO
+  IN_PROGRESS
+  IN_REVIEW
+  DONE
+  CANCELLED
+}
+
+enum EpicStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+  CANCELLED
 }
